@@ -1,0 +1,74 @@
+variables:
+  MAVEN_CLI_OPTS: "-s .m2/settings.xml --batch-mode"
+  MAVEN_OPTS: "-Dmaven.repo.local=.m2/repository"
+
+stages:
+  - build
+  - test
+  - packaging
+  - packaging:test
+  - packaging:upload
+  - packaging:container
+
+cache:
+  paths:
+    - .m2/repository/
+    - target/
+
+build:
+  image: maven:latest
+  stage: build
+  script:
+    - mvn $MAVEN_CLI_OPTS compile
+
+test:
+  image: maven:latest
+  stage: test
+  script:
+    - echo "I WANT TO BE TESTED!!!"
+    - echo "I DON'T WORK ACTUALLY!!!"
+    - echo "THAT'S NOT GOOD!!!"
+
+package:debian:build:
+  image: debian:10
+  stage: packaging
+  artifacts:
+    expire_in: 1 week
+    paths:
+    - "*.deb"
+  script:
+    - apt-get update
+    - apt-get install -y build-essential
+    - apt-get install -y debhelper openjdk-11-jre-headless maven
+    - dpkg-buildpackage --pre-clean -A -us -ui -uc
+    - "cp ../*.deb ."
+
+package:debian:test:
+  image: debian:10
+  stage: packaging:test
+  dependencies:
+    - package:debian:build
+  script:
+    - "ls *.deb"
+    - "apt-get update"
+    - "apt-get install -y ./jicofo*.deb"
+    - "dpkg -L jicofo | sort"
+
+package:debian:upload:
+  image: debian:10
+  stage: packaging:upload
+  dependencies:
+    - package:debian:build
+    - package:debian:test
+  script:
+    - "apt-get update"
+    - "apt-get install -y curl"
+    - "cat *.deb | curl -u ${APT_USER}:${APT_PASSWORD} -H 'Content-Type: multipart/form-data' --data-binary '@-' ${APT_REPOSITORY}"
+
+package:debian:docker:
+  stage: packaging:container
+  script:
+    - "docker build -t ${DOCKER_REPOSITORY}/jicofo:debian ."
+    - "docker push ${DOCKER_REPOSITORY}/jicofo:debian"
+  tags:
+    - shell
